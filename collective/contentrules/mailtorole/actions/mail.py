@@ -226,7 +226,7 @@ action or enter an email in the portal properties")
                               subject=subject, charset='utf-8',
                               msg_type="text/html"
                               )
-                logger.info("{} email sent to {}".format(recipient, subject))
+                # logger.info("{} email sent to {}".format(recipient, subject))
             except (MailHostError, SMTPException):
                 logger.exception(
                     'mail error: Attempt to send mail in content rule failed'
