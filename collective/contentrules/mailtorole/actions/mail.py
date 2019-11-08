@@ -13,6 +13,7 @@ from plone.contentrules.rule.interfaces import IRuleElementData, IExecutable
 from plone.stringinterp.interfaces import IStringInterpolator
 from smtplib import SMTPException
 from zope import schema
+from zope.annotation.interfaces import IAnnotations
 from zope.component import adapts
 from zope.component import getUtility
 from zope.component.interfaces import ComponentLookupError
@@ -66,6 +67,12 @@ role as an acquired role also receive this email?"),
                       default=u"Should users that have this \
 role as a role in the whole site also receive this email?"),
         required=False)
+    notify_once = schema.Bool(
+        title=_(u'field_notify_once_title', default=u"Only Notify User Once"),
+        description=_(u'field_no_description',
+                      default=u"Do not resend email to recipients \
+who already gotten this email."),
+        required=False)
     message = schema.Text(
         title=_plone(u"Message"),
         description=_(u'field_message_description',
@@ -88,6 +95,7 @@ class MailRoleAction(SimpleItem):
     message = u''
     acquired = False
     global_roles = False
+    notify_once = False
     element = 'plone.actions.MailRole'
 
     @property
@@ -139,6 +147,7 @@ action or enter an email in the portal properties")
             source = '"%s" <%s>' % (from_name, from_address)
 
         obj = self.event.object
+        annotations = IAnnotations(obj)
 
         interpolator = IStringInterpolator(obj)
 
@@ -220,17 +229,25 @@ action or enter an email in the portal properties")
         # of first line as header.
         message = "\n%s" % interpolator(self.element.message)
         subject = interpolator(self.element.subject)
+        
+        existing_recipients = annotations.get('existing_recipients', [])
         for recipient in recipients_mail:
+            if self.element.notify_once and recipient in existing_recipients:
+                continue
             try:
                 mailhost.send(message, recipient, source,
                               subject=subject, charset='utf-8',
                               msg_type="text/html"
                               )
-                # logger.info("{} email sent to {}".format(recipient, subject))
+                logger.info("{} email sent to {}".format(recipient, subject))
             except (MailHostError, SMTPException):
                 logger.exception(
                     'mail error: Attempt to send mail in content rule failed'
                 )
+            else:
+                existing_recipients.append(recipient)
+                annotations['existing_recipients'] = \
+                    list(set(existing_recipients))
         return True
 
 

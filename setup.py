@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(name='collective.contentrules.mailtorole',
-      version='2.0.dev0',
+      version='2.0.dev1',
       description="Plone rule: send email to users having a role on the object",
       long_description=(open("README.txt").read() + "\n" +
                         open("CHANGES.rst").read()),
