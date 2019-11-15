@@ -116,6 +116,47 @@ class MailActionExecutor(object):
         self.element = element
         self.event = event
 
+
+    def get_acquired_users_by_local_roles(self, obj):
+        # check for the acquired roles
+        if self.element.acquired:
+            sharing_page = obj.unrestrictedTraverse('@@sharing')
+            acquired_roles = sharing_page._inherited_roles()
+            if hasattr(sharing_page, '_borg_localroles'):
+                acquired_roles += sharing_page._borg_localroles()
+            acquired_users = [r[0] for r in acquired_roles
+                              if self.element.role in r[1]]
+            return acquired_users
+        return []
+
+
+    def get_users_by_global_roles(self):
+        # check for the global roles
+        if self.element.global_roles:
+            pas = getToolByName(self.event.object, 'acl_users')
+            rolemanager = pas.portal_role_manager
+            global_role_ids = [
+                p[0] for p in rolemanager.listAssignedPrincipals(
+                    self.element.role
+                )
+            ]
+            return global_role_ids
+        return []
+
+    def get_recipient_mail(self, recipients):
+        # look up e-mail addresses for the found users
+        recipients_mail = set()
+        for user in recipients:
+            member = self.membertool.getMemberById(user)
+            # check whether user really exists
+            # before getting its email address
+            if not member:
+                continue
+            recipient_prop = member.getProperty('email')
+            if recipient_prop is not None and len(recipient_prop) > 0:
+                recipients_mail.add(recipient_prop)
+        return recipients_mail
+
     def __call__(self):
         # mailhost = getToolByName(aq_inner(self.context), "MailHost")
         mailhost = getUtility(IMailHost)
@@ -126,7 +167,7 @@ class MailActionExecutor(object):
 
         source = self.element.source
         urltool = getToolByName(aq_inner(self.context), "portal_url")
-        membertool = getToolByName(aq_inner(self.context), "portal_membership")
+        self.membertool = getToolByName(aq_inner(self.context), "portal_membership")
 
         portal = urltool.getPortalObject()
         if not source:
@@ -164,24 +205,13 @@ action or enter an email in the portal properties")
                 recipients.add(user)
 
         # check for the acquired roles
-        if self.element.acquired:
-            sharing_page = obj.unrestrictedTraverse('@@sharing')
-            acquired_roles = sharing_page._inherited_roles()
-            if hasattr(sharing_page, '_borg_localroles'):
-                acquired_roles += sharing_page._borg_localroles()
-            acquired_users = [r[0] for r in acquired_roles
-                              if self.element.role in r[1]]
+        acquired_users = self.get_acquired_users_by_local_roles(obj)
+        if acquired_users:
             recipients.update(acquired_users)
 
         # check for the global roles
-        if self.element.global_roles:
-            pas = getToolByName(self.event.object, 'acl_users')
-            rolemanager = pas.portal_role_manager
-            global_role_ids = [
-                p[0] for p in rolemanager.listAssignedPrincipals(
-                    self.element.role
-                )
-            ]
+        global_role_ids = self.get_users_by_global_roles()
+        if global_role_ids:
             recipients.update(global_role_ids)
 
         # check to see if the recipents are users or groups
@@ -207,29 +237,31 @@ action or enter an email in the portal properties")
                 [new_recipients.append(user_id)
                  for user_id in _getGroupMemberIds(group)]
 
+
         for recipient in group_recipients:
             recipients.remove(recipient)
 
         for recipient in new_recipients:
             recipients.add(recipient)
 
-        # look up e-mail addresses for the found users
-        recipients_mail = set()
-        for user in recipients:
-            member = membertool.getMemberById(user)
-            # check whether user really exists
-            # before getting its email address
-            if not member:
-                continue
-            recipient_prop = member.getProperty('email')
-            if recipient_prop is not None and len(recipient_prop) > 0:
-                recipients_mail.add(recipient_prop)
+        recipients_mail = self.get_recipient_mail(recipients)
 
         # Prepend interpolated message with \n to avoid interpretation
         # of first line as header.
         message = "\n%s" % interpolator(self.element.message)
         subject = interpolator(self.element.subject)
+        return self.send_mail(
+            mailhost,
+            recipients_mail,
+            source,
+            message,
+            subject,
+            annotations
+        )
         
+    
+    def send_mail(self, mailhost, recipients_mail, source,
+                  message, subject, annotations):
         existing_recipients = annotations.get('existing_recipients', [])
         for recipient in recipients_mail:
             if self.element.notify_once and recipient in existing_recipients:
